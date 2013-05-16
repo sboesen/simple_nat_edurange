@@ -5,6 +5,29 @@ require 'yaml'
 data = YAML.load_file('input.yaml')
 players = data["players"]
 
+def gen_host_software(hosts)
+  rng = Random.new
+  data = <<data
+  #!/bin/sh
+  set -e
+  set -x
+  echo "Hello World.  The time is now $(date -R)!" | tee /root/output.txt
+data
+
+  if (rng.rand(2) == 0)
+    data += "\n sudo apt-get install apache2"
+  end
+  if (rng.rand(2) == 0)
+    data += "\n sudo apt-get install vsftpd"
+  end
+  if (rng.rand(2) == 0)
+    data += "\n sudo apt-get install bind9"
+  end
+  if (rng.rand(2) == 0)
+    data += "\n sudo apt-get install telnetd"
+  end
+end
+
 def gen_player_data(player_key)
   data = <<data
   #!/bin/sh
@@ -99,6 +122,10 @@ p player_subnets
 p player_cidrs
 p player_instances
 
+player_instances.each do |player_instance|
+  p player_instance.ip_address
+end
+
 player_subnets.each do |player_subnet|
   puts "Adding acls for Player subnet: #{player_subnet}"
   player_acl = AWS::EC2::NetworkACLCollection.new.create(vpc: vpc)
@@ -112,6 +139,9 @@ player_subnets.each do |player_subnet|
   end
 
   player_subnet.network_acl = player_acl
+end
 
+300.times do
+  hosts_subnet.instances.create(image_id: 'ami-3bec7952', key_pair: key, user_data: gen_host_software())
 end
 
