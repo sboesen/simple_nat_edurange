@@ -1,0 +1,117 @@
+#!/usr/bin/env ruby
+require 'simple_nat_edurange'
+require 'yaml'
+
+data = YAML.load_file('input.yaml')
+players = data["players"]
+
+def gen_player_data(player_key)
+  data = <<data
+  #!/bin/sh
+  set -e
+  set -x
+  echo "Hello World.  The time is now $(date -R)!" | tee /root/output.txt
+
+  key='#{player_key.chomp}'
+  echo $key >> /home/ubuntu/.ssh/authorized_keys
+data
+  data
+end
+ec2 = AWS::EC2::Client.new
+
+vpc = ec2.create_vpc(cidr_block: '10.0.0.0/16')
+puts "Created vpc #{vpc}"
+p vpc
+sleep(6)
+vpc = AWS::EC2::VPCCollection.new[vpc[:vpc][:vpc_id]]
+puts "Created vpc #{vpc}"
+
+igw = ec2.create_internet_gateway
+igw = AWS::EC2::InternetGatewayCollection.new[igw[:internet_gateway][:internet_gateway_id]]
+vpc.internet_gateway = igw
+#associate IGW with vpc
+
+# Get my keypair
+key = AWS::EC2::KeyPairCollection.new['newkey']
+
+
+# Create Host Subnet
+hosts_subnet = vpc.subnets.create('10.0.127.255/17')
+host_route_table = vpc.route_tables.create
+hosts_subnet.route_table = host_route_table
+
+# Create Nat Subnet
+nat_subnet = vpc.subnets.create('10.0.128.0/28')
+nat_route_table = vpc.route_tables.create
+nat_subnet.route_table = nat_route_table
+nat_instance = nat_subnet.instances.create(image_id: 'ami-2e1bc047', key_pair: key)
+
+# Route NAT traffic to internet
+nat_route_table.create_route("0.0.0.0/0", { internet_gateway: igw} )
+
+puts "Waiting for NAT instance to spin up..."
+sleep(35)
+# Route Host traffic to NAT
+host_route_table.create_route("0.0.0.0/0", { instance: nat_instance } )
+
+nat_instance.network_interfaces.first.source_dest_check = false
+nat_eip = AWS::EC2::ElasticIpCollection.new.create(vpc: true)
+nat_instance.associate_elastic_ip nat_eip
+
+vpc.security_groups.first.authorize_ingress(:tcp, 0..64555)
+
+p nat_instance
+p nat_eip
+p nat_instance.elastic_ip
+
+# Ok, have nat instance and routes set up. Now just create player subnets, create routes to the nat instance, block other player subnets
+
+player_subnets = []
+player_cidrs = []
+player_instances = []
+
+
+octet_start = 0
+players.each do |player|
+  octet_start += 16
+  if octet_start > 200
+    puts "stopped adding players, too many!"
+    break
+  end
+  player_subnet_cidr = "10.0.128.#{octet_start}/28"
+  player_cidrs.push player_subnet_cidr
+
+  player_subnet = vpc.subnets.create(player_subnet_cidr)
+  player_subnets.push player_subnet
+
+  player_instance = player_subnet.instances.create(image_id: 'ami-3bec7952', key_pair: key, user_data: gen_player_data(player["key"]))
+  player_instances.push player_instance
+
+  player_route_table = vpc.route_tables.create
+  player_subnet.route_table = player_route_table
+
+  player_route_table.create_route("0.0.0.0/0", { instance: nat_instance } )
+end
+
+puts "Done creating instances/subnets for players."
+
+p player_subnets
+p player_cidrs
+p player_instances
+
+player_subnets.each do |player_subnet|
+  puts "Adding acls for Player subnet: #{player_subnet}"
+  player_acl = AWS::EC2::NetworkACLCollection.new.create(vpc: vpc)
+
+  rule_start = 100
+  player_cidrs.each do |player_cidr|
+    next if player_subnet.cidr_block == player_cidr
+    rule_start += 1
+    player_acl.create_entry(rule_number: rule_start, action: :deny, protocol: -1, cidr_block: player_cidr, egress: false) 
+    player_acl.create_entry(rule_number: rule_start, action: :deny, protocol: -1, cidr_block: player_cidr, egress: true)
+  end
+
+  player_subnet.network_acl = player_acl
+
+end
+
