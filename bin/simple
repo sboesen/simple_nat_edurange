@@ -5,7 +5,7 @@ require 'yaml'
 data = YAML.load_file('input.yaml')
 players = data["players"]
 
-def gen_host_software(hosts)
+def gen_host_software()
   rng = Random.new
   data = <<data
   #!/bin/sh
@@ -26,6 +26,7 @@ data
   if (rng.rand(2) == 0)
     data += "\n sudo apt-get install telnetd"
   end
+  data
 end
 
 def gen_player_data(player_key)
@@ -123,7 +124,7 @@ p player_cidrs
 p player_instances
 
 player_instances.each do |player_instance|
-  p player_instance.ip_address
+  p player_instance.private_ip_address
 end
 
 player_subnets.each do |player_subnet|
@@ -141,7 +142,9 @@ player_subnets.each do |player_subnet|
   player_subnet.network_acl = player_acl
 end
 
-300.times do
-  hosts_subnet.instances.create(image_id: 'ami-3bec7952', key_pair: key, user_data: gen_host_software())
+host_instances = []
+20.times do
+  host_instance = hosts_subnet.instances.create(image_id: 'ami-3bec7952', key_pair: key, user_data: gen_host_software())
+  host_instances.push host_instance
 end
 
