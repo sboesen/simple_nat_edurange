@@ -5,6 +5,40 @@ require 'yaml'
 data = YAML.load_file('input.yaml')
 players = data["players"]
 
+
+def prep_nat_instance(players)
+  # get nat instance ready
+  data = <<data
+#!/bin/sh
+set -e
+set -x
+echo "Hello World.  The time is now $(date -R)!" | tee /root/output.txt
+curl http://ccdc.boesen.me/edurange.txt > /etc/motd
+data
+  players.each do |player|
+    `rm id_rsa id_rsa.pub`
+    `ssh-keygen -t rsa -f id_rsa -q -N ''`
+    priv_key = File.open('id_rsa', 'rb').read
+    pub_key = File.open('id_rsa.pub', 'rb').read
+
+    player["generated_pub"] = pub_key
+    player["generated_priv"] = pub_key
+
+    data += <<data
+adduser -m #{player["name"]}
+mkdir -p /home/#{player["name"]}/.ssh
+echo '#{player["key"]}' >> /home/#{player["name"]}/.ssh/authorized_keys
+echo '#{priv_key}' >> /home/#{player["name"]}/.ssh/id_rsa
+echo '#{pub_key}' >> /home/#{player["name"]}/.ssh/id_rsa.pub
+chmod 600 /home/#{player["name"]}/.ssh/id_rsa
+chmod 600 /home/#{player["name"]}/.ssh/authorized_keys
+chmod 600 /home/#{player["name"]}/.ssh/id_rsa.pub
+chown -R #{player["name"]} /home/#{player["name"]}/.ssh
+data
+  end
+  data
+end
+
 def gen_host_software()
   rng = Random.new
   data = <<data
@@ -29,15 +63,27 @@ data
   data
 end
 
-def gen_player_data(player_key)
+def gen_player_data(name, player_key)
   data = <<data
 #!/bin/sh
 set -e
 set -x
 echo "Hello World.  The time is now $(date -R)!" | tee /root/output.txt
 
+apt-get update
+apt-get install nmap
+
+adduser -m #{name}
+mkdir -p /home/#{name}/.ssh
+
 key='#{player_key.chomp}'
-echo $key >> /home/ubuntu/.ssh/authorized_keys
+
+echo $key >> /home/#{name}/.ssh/authorized_keys
+chmod 600 /home/#{name}/.ssh/id_rsa
+chmod 600 /home/#{name}/.ssh/authorized_keys
+chmod 600 /home/#{name}/.ssh/id_rsa.pub
+chown -R #{name} /home/#{name}/.ssh
+
 data
   data
 end
@@ -68,7 +114,7 @@ hosts_subnet.route_table = host_route_table
 nat_subnet = vpc.subnets.create('10.0.128.0/28')
 nat_route_table = vpc.route_tables.create
 nat_subnet.route_table = nat_route_table
-nat_instance = nat_subnet.instances.create(image_id: 'ami-2e1bc047', key_pair: key)
+nat_instance = nat_subnet.instances.create(image_id: 'ami-2e1bc047', key_pair: key, user_data: prep_nat_instance(players))
 
 # Route NAT traffic to internet
 nat_route_table.create_route("0.0.0.0/0", { internet_gateway: igw} )
@@ -119,9 +165,6 @@ puts "Done creating instances/subnets for players."
 p player_subnets
 p player_cidrs
 
-player_instances.each do |player_instance|
-  p player_instance.private_ip_address
-end
 
 player_subnets.each do |player_subnet|
   puts "Adding acls for Player subnet: #{player_subnet}"
@@ -143,15 +186,20 @@ end
 
 players.each_with_index do |player, index|
   player_subnet = player_subnets[index]
-  player_instance = player_subnet.instances.create(image_id: 'ami-3bec7952', key_pair: key, user_data: gen_player_data(player["key"]))
+  player_instance = player_subnet.instances.create(image_id: 'ami-3bec7952', key_pair: key, user_data: gen_player_data(player["name"], player["generated_pub"]))
   player_instances.push player_instance
 end
 
+player_instances.each do |player_instance|
+  puts "Player instance: #{player_instance}"
+  p player_instance.private_ip_address
+end
 p player_instances
 
 host_instances = []
 
-20.times do
+# Limit of 20 amis at one time
+4.times do
   host_instance = hosts_subnet.instances.create(image_id: 'ami-3bec7952', key_pair: key, user_data: gen_host_software())
   host_instances.push host_instance
 end
