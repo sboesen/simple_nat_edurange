@@ -8,10 +8,10 @@ players = data["players"]
 def gen_host_software()
   rng = Random.new
   data = <<data
-  #!/bin/sh
-  set -e
-  set -x
-  echo "Hello World.  The time is now $(date -R)!" | tee /root/output.txt
+#!/bin/sh
+set -e
+set -x
+echo "Hello World.  The time is now $(date -R)!" | tee /root/output.txt
 data
 
   if (rng.rand(2) == 0)
@@ -31,13 +31,13 @@ end
 
 def gen_player_data(player_key)
   data = <<data
-  #!/bin/sh
-  set -e
-  set -x
-  echo "Hello World.  The time is now $(date -R)!" | tee /root/output.txt
+#!/bin/sh
+set -e
+set -x
+echo "Hello World.  The time is now $(date -R)!" | tee /root/output.txt
 
-  key='#{player_key.chomp}'
-  echo $key >> /home/ubuntu/.ssh/authorized_keys
+key='#{player_key.chomp}'
+echo $key >> /home/ubuntu/.ssh/authorized_keys
 data
   data
 end
@@ -74,7 +74,7 @@ nat_instance = nat_subnet.instances.create(image_id: 'ami-2e1bc047', key_pair: k
 nat_route_table.create_route("0.0.0.0/0", { internet_gateway: igw} )
 
 puts "Waiting for NAT instance to spin up..."
-sleep(35)
+sleep(40)
 # Route Host traffic to NAT
 host_route_table.create_route("0.0.0.0/0", { instance: nat_instance } )
 
@@ -108,9 +108,6 @@ players.each do |player|
   player_subnet = vpc.subnets.create(player_subnet_cidr)
   player_subnets.push player_subnet
 
-  player_instance = player_subnet.instances.create(image_id: 'ami-3bec7952', key_pair: key, user_data: gen_player_data(player["key"]))
-  player_instances.push player_instance
-
   player_route_table = vpc.route_tables.create
   player_subnet.route_table = player_route_table
 
@@ -121,7 +118,6 @@ puts "Done creating instances/subnets for players."
 
 p player_subnets
 p player_cidrs
-p player_instances
 
 player_instances.each do |player_instance|
   p player_instance.private_ip_address
@@ -136,13 +132,25 @@ player_subnets.each do |player_subnet|
     next if player_subnet.cidr_block == player_cidr
     rule_start += 1
     player_acl.create_entry(rule_number: rule_start, action: :deny, protocol: -1, cidr_block: player_cidr, egress: false) 
-    player_acl.create_entry(rule_number: rule_start, action: :deny, protocol: -1, cidr_block: player_cidr, egress: true)
+    rule_start += 1
+    player_acl.create_entry(rule_number: rule_start, action: :allow, protocol: -1, cidr_block: '0.0.0.0/0', egress: false)
+    rule_start += 1
+    player_acl.create_entry(rule_number: rule_start, action: :allow, protocol: -1, cidr_block: '0.0.0.0/0', egress: true)
   end
 
   player_subnet.network_acl = player_acl
 end
 
+players.each_with_index do |player, index|
+  player_subnet = player_subnets[index]
+  player_instance = player_subnet.instances.create(image_id: 'ami-3bec7952', key_pair: key, user_data: gen_player_data(player["key"]))
+  player_instances.push player_instance
+end
+
+p player_instances
+
 host_instances = []
+
 20.times do
   host_instance = hosts_subnet.instances.create(image_id: 'ami-3bec7952', key_pair: key, user_data: gen_host_software())
   host_instances.push host_instance
