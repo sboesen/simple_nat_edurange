@@ -49,16 +49,16 @@ echo "Hello World.  The time is now $(date -R)!" | tee /root/output.txt
 data
 
   if (rng.rand(2) == 0)
-    data += "\n sudo apt-get install apache2"
+    data += "\n apt-get install apache2"
   end
   if (rng.rand(2) == 0)
-    data += "\n sudo apt-get install vsftpd"
+    data += "\n apt-get install vsftpd"
   end
   if (rng.rand(2) == 0)
-    data += "\n sudo apt-get install bind9"
+    data += "\n apt-get install bind9"
   end
   if (rng.rand(2) == 0)
-    data += "\n sudo apt-get install telnetd"
+    data += "\n apt-get install telnetd"
   end
   data
 end
