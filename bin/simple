@@ -70,10 +70,7 @@ set -e
 set -x
 echo "Hello World.  The time is now $(date -R)!" | tee /root/output.txt
 
-apt-get update
-apt-get install nmap
-
-adduser -m #{name}
+useradd -m #{name}
 mkdir -p /home/#{name}/.ssh
 
 key='#{player_key.chomp}'
@@ -84,6 +81,9 @@ chmod 600 /home/#{name}/.ssh/authorized_keys
 chmod 600 /home/#{name}/.ssh/id_rsa.pub
 chown -R #{name} /home/#{name}/.ssh
 
+
+apt-get update
+apt-get -y install nmap
 data
   data
 end
